@@ -842,6 +842,7 @@ class ACEStepPipeline:
         audio2audio_enable=False,
         ref_audio_strength=0.5,
         ref_latents=None,
+        similarity_guidance_scale=0.0,
     ):
 
         logger.info(
@@ -1310,6 +1311,43 @@ class ACEStepPipeline:
                     timestep=timestep,
                 ).sample
 
+            # Apply similarity guidance if we are in retake mode and it's enabled
+            if add_retake_noise and ref_latents is not None and similarity_guidance_scale > 0:
+                with torch.enable_grad():
+                    # Make a copy of the latents that we can calculate gradients on
+                    latents_for_grad = target_latents.detach().requires_grad_(True)
+
+                    # Use the scheduler to predict what the "clean" audio (x0) would look like from this step
+                    # This is a hypothetical final output based on the current state
+                    x0_pred = scheduler.predict_x0(
+                        model_output=noise_pred, timestep=t, sample=latents_for_grad
+                    )
+
+                    # Ensure the reference latent has the same length as the prediction
+                    # This is important if the generated duration is different from the input
+                    if x0_pred.shape[-1] != ref_latents.shape[-1]:
+                        # Simple cropping, more advanced alignment could be used
+                        min_len = min(x0_pred.shape[-1], ref_latents.shape[-1])
+                        ref_latents_aligned = ref_latents[..., :min_len]
+                        x0_pred_aligned = x0_pred[..., :min_len]
+                    else:
+                        ref_latents_aligned = ref_latents
+                        x0_pred_aligned = x0_pred
+                    
+                    # Calculate the similarity loss. We use Mean Squared Error for simplicity and effectiveness.
+                    # This measures how "far" our prediction is from the MIDI's structure.
+                    loss = torch.nn.functional.mse_loss(x0_pred_aligned, ref_latents_aligned)
+
+                    # Calculate the gradient of this loss. The gradient points in the
+                    # direction that would make our prediction *more* like the MIDI.
+                    grad = torch.autograd.grad(loss, latents_for_grad)[0]
+
+                    # Modify the noise prediction to "nudge" the generation.
+                    # We subtract the gradient, pushing the generation away from being
+                    # dissimilar to the MIDI, effectively making it more similar.
+                    # The `similarity_guidance_scale` controls how strong this "nudge" is.
+                    noise_pred = noise_pred - grad * similarity_guidance_scale
+
             if is_repaint and i >= n_min:
                 t_i = t / 1000
                 if i + 1 < len(timesteps):
@@ -1466,6 +1504,7 @@ class ACEStepPipeline:
         edit_n_min: float = 0.0,
         edit_n_max: float = 1.0,
         edit_n_avg: int = 1,
+        similarity_guidance_scale: float = 0.0,
         save_path: str = None,
         batch_size: int = 1,
         debug: bool = False,
@@ -1558,8 +1597,8 @@ class ACEStepPipeline:
             src_latents = self.infer_latents(src_audio_path)
         
         ref_latents = None
-        if ref_audio_input is not None and audio2audio_enable:
-            assert ref_audio_input is not None, "ref_audio_input is required for audio2audio task"
+        if (ref_audio_input is not None and audio2audio_enable) or (task == "retake" and ref_audio_input is not None):
+            assert ref_audio_input is not None, "ref_audio_input is required for audio2audio/retake task"
             assert os.path.exists(
                 ref_audio_input
             ), f"ref_audio_input {ref_audio_input} does not exist"
@@ -1655,6 +1694,7 @@ class ACEStepPipeline:
                 audio2audio_enable=audio2audio_enable,
                 ref_audio_strength=ref_audio_strength,
                 ref_latents=ref_latents,
+                similarity_guidance_scale=similarity_guidance_scale,
             )
 
         end_time = time.time()
@@ -1716,6 +1756,7 @@ class ACEStepPipeline:
             "audio2audio_enable": audio2audio_enable,
             "ref_audio_strength": ref_audio_strength,
             "ref_audio_input": ref_audio_input,
+            "similarity_guidance_scale": similarity_guidance_scale,
         }
         # save input_params_json
         for output_audio_path in output_paths:
