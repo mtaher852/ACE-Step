@@ -93,18 +93,6 @@ def create_text2music_ui(
     load_data_func=None,
 ):
 
-    with gr.Row(equal_height=True):
-        # Get base output directory from environment variable, defaulting to CWD-relative 'outputs'.
-        # This default (./outputs) is suitable for non-Docker local development.
-        # For Docker, the ACE_OUTPUT_DIR environment variable should be set (e.g., to /app/outputs).
-        output_file_dir = os.environ.get("ACE_OUTPUT_DIR", "./outputs")
-        if not os.path.isdir(output_file_dir):
-            os.makedirs(output_file_dir, exist_ok=True)
-        json_files = [f for f in os.listdir(output_file_dir) if f.endswith('.json')]
-        json_files.sort(reverse=True, key=lambda x: int(x.split('_')[1]))
-        output_files = gr.Dropdown(choices=json_files, label="Select previous generated input params", scale=9, interactive=True)
-        load_bnt = gr.Button("Load", variant="primary", scale=1)
-
     with gr.Row():
         with gr.Column():
             with gr.Row(equal_height=True):
@@ -119,7 +107,6 @@ def create_text2music_ui(
                     info="-1 means random duration (30 ~ 240).",
                     scale=9,
                 )
-                format = gr.Dropdown(choices=["mp3", "ogg", "flac", "wav"], value="wav", label="Format")
                 sample_bnt = gr.Button("Sample", variant="secondary", scale=1)
 
             # audio2audio
@@ -130,9 +117,7 @@ def create_text2music_ui(
                     choices=["ACE-Step/ACE-Step-v1-chinese-rap-LoRA", "none"],
                     value="none",
                     allow_custom_value=True,
-                    min_width=300
                 )
-                lora_weight = gr.Number(value=1.0, label="Lora weight", step=0.1, maximum=3, minimum=-3)
 
             ref_audio_input = gr.Audio(type="filepath", label="Reference Audio (for Audio2Audio)", visible=False, elem_id="ref_audio_input", show_download_button=True)
             ref_audio_strength = gr.Slider(
@@ -236,11 +221,11 @@ def create_text2music_ui(
 
             with gr.Accordion("Advanced Settings", open=False):
                 scheduler_type = gr.Radio(
-                    ["euler", "heun", "pingpong"],
+                    ["euler", "heun"],
                     value="euler",
                     label="Scheduler Type",
                     elem_id="scheduler_type",
-                    info="Scheduler type for the generation. euler is recommended. heun will take more time. pingpong use SDE",
+                    info="Scheduler type for the generation. euler is recommended. heun will take more time.",
                 )
                 cfg_type = gr.Radio(
                     ["cfg", "apg", "cfg_star"],
@@ -325,7 +310,6 @@ def create_text2music_ui(
 
                 def retake_process_func(json_data, retake_variance, retake_seeds):
                     return text2music_process_func(
-                        json_data["format"],
                         json_data["audio_duration"],
                         json_data["prompt"],
                         json_data["lyrics"],
@@ -355,8 +339,7 @@ def create_text2music_ui(
                         retake_seeds=retake_seeds,
                         retake_variance=retake_variance,
                         task="retake",
-                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"],
-                        lora_weight=1 if "lora_weight" not in json_data else json_data["lora_weight"]
+                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"]
                     )
 
                 retake_bnt.click(
@@ -455,7 +438,6 @@ def create_text2music_ui(
                         src_audio_path = json_data["audio_path"]
 
                     return text2music_process_func(
-                        format.value,
                         json_data["audio_duration"],
                         prompt,
                         lyrics,
@@ -480,8 +462,7 @@ def create_text2music_ui(
                         repaint_start=repaint_start,
                         repaint_end=repaint_end,
                         src_audio_path=src_audio_path,
-                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"],
-                        lora_weight=1 if "lora_weight" not in json_data else json_data["lora_weight"]
+                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"]
                     )
 
                 repaint_bnt.click(
@@ -630,7 +611,6 @@ def create_text2music_ui(
                         edit_lyrics = lyrics
 
                     return text2music_process_func(
-                        format.value,
                         json_data["audio_duration"],
                         prompt,
                         lyrics,
@@ -656,8 +636,7 @@ def create_text2music_ui(
                         edit_n_min=edit_n_min,
                         edit_n_max=edit_n_max,
                         retake_seeds=retake_seeds,
-                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"],
-                        lora_weight=1 if "lora_weight" not in json_data else json_data["lora_weight"]
+                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"]
                     )
 
                 edit_bnt.click(
@@ -778,7 +757,6 @@ def create_text2music_ui(
                     repaint_start = -left_extend_length
                     repaint_end = json_data["audio_duration"] + right_extend_length
                     return text2music_process_func(
-                        format.value,
                         json_data["audio_duration"],
                         prompt,
                         lyrics,
@@ -803,16 +781,7 @@ def create_text2music_ui(
                         repaint_start=repaint_start,
                         repaint_end=repaint_end,
                         src_audio_path=src_audio_path,
-                        lora_name_or_path=(
-                            "none"
-                            if "lora_name_or_path" not in json_data
-                            else json_data["lora_name_or_path"]
-                        ),
-                        lora_weight=(
-                            1
-                            if "lora_weight" not in json_data
-                            else json_data["lora_weight"]
-                        ),
+                        lora_name_or_path="none" if "lora_name_or_path" not in json_data else json_data["lora_name_or_path"]
                     )
 
                 extend_bnt.click(
@@ -923,44 +892,9 @@ def create_text2music_ui(
             ],
         )
 
-        def load_data(json_file):
-            if isinstance(output_file_dir, str):
-                json_file = os.path.join(output_file_dir, json_file)
-            json_data = load_data_func(json_file)
-            return json2output(json_data)
-
-        load_bnt.click(
-            fn=load_data,
-            inputs=[output_files],
-            outputs=[
-                audio_duration,
-                prompt,
-                lyrics,
-                infer_step,
-                guidance_scale,
-                scheduler_type,
-                cfg_type,
-                omega_scale,
-                manual_seeds,
-                guidance_interval,
-                guidance_interval_decay,
-                min_guidance_scale,
-                use_erg_tag,
-                use_erg_lyric,
-                use_erg_diffusion,
-                oss_steps,
-                guidance_scale_text,
-                guidance_scale_lyric,
-                audio2audio_enable,
-                ref_audio_strength,
-                ref_audio_input,
-            ],
-        )
-
     text2music_bnt.click(
         fn=text2music_process_func,
         inputs=[
-            format,
             audio_duration,
             prompt,
             lyrics,
@@ -983,7 +917,6 @@ def create_text2music_ui(
             ref_audio_strength,
             ref_audio_input,
             lora_name_or_path,
-            lora_weight
         ],
         outputs=outputs + [input_params_json],
     )
@@ -1000,6 +933,11 @@ def create_main_demo_ui(
         gr.Markdown(
             """
             <h1 style="text-align: center;">ACE-Step: A Step Towards Music Generation Foundation Model</h1>
+            <p>
+                <a href="https://ace-step.github.io/" target='_blank'>Project</a> |
+                <a href="https://huggingface.co/ACE-Step/ACE-Step-v1-3.5B">Checkpoints</a> |
+                <a href="https://discord.gg/rjAZz2xBdG" target='_blank'>Discord</a> 
+            </p>
         """
         )
         with gr.Tab("text2music"):
